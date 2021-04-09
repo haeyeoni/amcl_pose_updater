@@ -4,5 +4,5 @@ We added amcl pose updater that updates amcl_pose and the particle states when k
 
 Usage:
 ```
-rosservice call /global_localization  new_x new_y new_theta
+rosservice call /pose_update  new_x new_y new_theta
 ```
