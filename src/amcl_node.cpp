@@ -76,6 +76,8 @@
 // For monitoring the estimator
 #include <diagnostic_updater/diagnostic_updater.h>
 
+#include <amcl_pose_updater/UpdatePose.h>
+
 #define NEW_UNIFORM_SAMPLING 1
 
 using namespace amcl;
@@ -165,6 +167,8 @@ class AmclNode
     // Callbacks
     bool globalLocalizationCallback(std_srvs::Empty::Request& req,
                                     std_srvs::Empty::Response& res);
+    bool poseUpdateCallback(amcl_pose_updater::UpdatePose::Request& req,
+                                     amcl_pose_updater::UpdatePose::Response& res);
     bool nomotionUpdateCallback(std_srvs::Empty::Request& req,
                                     std_srvs::Empty::Response& res);
     bool setMapCallback(nav_msgs::SetMap::Request& req,
@@ -251,6 +255,7 @@ class AmclNode
     ros::Publisher pose_pub_;
     ros::Publisher particlecloud_pub_;
     ros::ServiceServer global_loc_srv_;
+    ros::ServiceServer pose_update_srv_;
     ros::ServiceServer nomotion_update_srv_; //to let amcl update samples without requiring motion
     ros::ServiceServer set_map_srv_;
     ros::Subscriber initial_pose_sub_old_;
@@ -472,6 +477,9 @@ AmclNode::AmclNode() :
   particlecloud_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud", 2, true);
   global_loc_srv_ = nh_.advertiseService("global_localization", 
 					 &AmclNode::globalLocalizationCallback,
+                                         this);
+  pose_update_srv_ = nh_.advertiseService("pose_update", 
+					 &AmclNode::poseUpdateCallback,
                                          this);
   nomotion_update_srv_= nh_.advertiseService("request_nomotion_update", &AmclNode::nomotionUpdateCallback, this);
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
@@ -1090,6 +1098,38 @@ AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
                 (void *)map_);
   ROS_INFO("Global initialisation done!");
   pf_init_ = false;
+  return true;
+}
+
+
+bool
+AmclNode::poseUpdateCallback(amcl_pose_updater::UpdatePose::Request& req,
+                                     amcl_pose_updater::UpdatePose::Response& res)
+{
+  if( map_ == NULL ) {
+    return true;
+  }
+  boost::recursive_mutex::scoped_lock pl(configuration_mutex_);
+  
+  ROS_INFO("Update Pose with new known position");
+  amcl_hyp_t* new_pose_hyp_ = new amcl_hyp_t();
+  
+  pf_vector_t pf_new_pose_mean = pf_vector_zero();
+  pf_new_pose_mean.v[0] = req.new_x;
+  pf_new_pose_mean.v[1] = req.new_y;
+  pf_new_pose_mean.v[2] = req.new_theta;
+  pf_matrix_t pf_new_pose_cov = pf_matrix_zero();
+  pf_new_pose_cov.m[0][0] = 0.5 * 0.5;
+  pf_new_pose_cov.m[1][1] = 0.5 * 0.5;
+  pf_new_pose_cov.m[2][2] = (M_PI/12.0) * (M_PI/12.0);
+  new_pose_hyp_->pf_pose_mean = pf_new_pose_mean;
+  new_pose_hyp_->pf_pose_cov = pf_new_pose_cov;
+
+  pf_init(pf_, new_pose_hyp_->pf_pose_mean, new_pose_hyp_->pf_pose_cov);
+  pf_init_ = false;
+  delete new_pose_hyp_;
+
+  ROS_INFO("Pose Update is done!");
   return true;
 }
 
